@@ -1,0 +1,174 @@
+---
+title: "II 0602 Diseño de experimentos básico"
+subtitle: "Potencia estadística - Simulación interactiva"
+author: "Ing. Steven García Goñi"
+output: 
+  html_document: 
+    highlight: zenburn
+    theme: readable
+    number_sections: no
+    fig_height: 6
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      warning = FALSE, 
+                      message = FALSE,
+                      fig.align = "c")
+```
+
+```{r libraries}
+
+# libraries -------------------------------------------------------------------
+
+library(tidyverse)
+library(broom)
+library(janitor)
+library(shiny)
+library(gt)
+
+# ggplot theme ----------------------------------------------------------------
+
+ggplot2::theme_set(theme_bw())
+
+```
+
+# ¿Qué es potencia estadística y por qué es importante?
+
+La potencia es la probabilidad de rechazar la hipótesis nula dado que esta es falsa. En otras palabras, es la probabilidad de encontrar un "efecto" o "coeficiente" significativo dado que en la población ese "efecto" existe. Este concepto es muy importante en el diseño de investigaciones, porque uno quiere tener un tamaño de muestra suficientemente grande para detectar el efecto de interés como significativo, pero no demasiado grande como para encontrar que relaciones pequeñas sean importantes de reportar.
+
+En general, en el modelo $E(Y|X)=X'*\beta_i + \epsilon$, la hipótesis nula por defecto es: $H_0: \beta_i=0$, y la hipótesis alternativa sería $H_1: \beta_i \ne 0$. Como sabe, esta prueba de hipótesis es importante porque, si no se rechaza $H_0$ (o sea, si no se encuentra que el coeficiente es significativo), entonces se argumenta que la variable asociada $X_i$ no es buena predictora de $Y$.
+
+Para el cálculo de potencia, usted necesita una información más, necesita plantearse qué valor del $\hat{\beta_i}$ usted  quiere detectar como significativo. Digamos que desde el punto de vista teórico, usted estima que $\hat{\beta_i} = 0.5$ y ese valor es relevante para la toma de decisiones, por lo que usted quiere que si $\hat{\beta_i} = 0.5$, este coeficiente sea detectado como significativo.
+
+## Ejemplo y simulación interactiva
+
+Para este ejemplo particular, tenemos la siguiente ecuación de regresión:
+
+$$
+y = 12 + \beta_1 \cdot X1 + 2 \cdot X2 + \epsilon
+$$
+
+Con la siguientes hipótesis:
+
+$$
+H_0: \beta_j = 0 \\
+H_1: \beta_j \ne 0 \\
+H_1^*: \beta_1 = 0.1 \\
+$$
+
+**¿Cual es la probabilidad de que dado que $\beta_1 = 0.1$ existe y es relevante para la toma de decisiones, este sea detectado como significativo?**
+
+Partiendo de un tamaño de $N = 30$, el porcentaje de veces que se rechaza la hipótesis nula es la potencia estadística para $\beta_1$, es decir, luego de simularse 1000 veces la regresión anterior se obtiene la probabilidad de que se detecte como significativo el valor de $\beta_1$.
+
+Recuerde que valores convencionales de potencia son: 80 % y 90 %.
+
+**Observaciones importantes:**
+
+-   Conforme $\hat{\beta_1}$ se aleje de cero, aumenta la potencia, es decir, hay más probabilidad de detectarlo como significativo (que no es cero, que se rechaza la hipótesis nula $H_0$, pues) y viceversa.
+-   Conforme aumente $N$, aumenta la potencia, es decir, hay más probabilidad de detectarlo como significativo (que no es cero, que se rechaza la hipótesis nula $H_0$, pues) y viceversa.
+
+Utilice la simulación que se le brinda a continuación y cambie los valores de de $N$ y $\beta_1$ para que note lo que se menciona en las observaciones anteriores. 
+
+*Nota: la simulación puede ser algo lenta, sobre todo con $N$ grandes, ya que el número de veces que se hace la simulación es elevado, sea paciente*
+
+El porcentaje que se muestra en `"Rechaza"` es la potencia obtenida.
+
+El valor mínimo de $\beta_1$ es de 0.1 y el máximo es de 50; respecto a $N$ el valor mínimo es de 10 y el máximo es de 50 000.
+
+¡Diviértase!
+
+```{r}
+
+# Define UI for application 
+ui <- fluidPage(
+  
+  # Application title
+  titlePanel("Simulación de la potencia"),
+  
+  # Sidebar
+  sidebarLayout(
+    sidebarPanel(
+      "Cambie los siguientes valores", 
+      numericInput("H",
+                  "Tamaño del efecto (B1):",
+                  min = 0.1,
+                  max = 50,
+                  value = 0.1), 
+      
+      numericInput("muestra",
+                  "Tamaño de muestra (N):",
+                  min = 10,
+                  max = 50000,
+                  value = 30)
+      
+    ),
+    
+    # Show a plot
+    mainPanel(
+      gt::gt_output(outputId = "table")
+    )
+  )
+)
+
+
+server <- function(input, output) {
+  
+  gt_tabl <- reactive({
+    
+    potencia <- function(N, B, aux){
+      
+      X1 <- rnorm(N, 1, 1)
+      X2 <- rnorm(N, 2.5, 2)
+      
+      media_desv <- 12 + B*X1 + 2*X2
+      
+      Y1 <- rnorm(N, mean = media_desv, sd = media_desv)
+      
+      datos <- data.frame(X1 = X1, X2 = X2, Y = Y1) %>% 
+        dplyr::filter(Y > 0)
+      
+      
+      mod_gaussiano <- datos %>% 
+        glm(Y ~ ., family = gaussian, data = .)
+      
+      mod_gaussiano %>%
+        broom::tidy() %>% 
+        janitor::clean_names()
+    }
+    
+    base_datos <- list(input$muestra, input$H, 1:1000) %>% 
+      purrr::pmap_dfr(potencia)
+    
+    base_datos %>% 
+      dplyr::filter(term == "X1") %>% 
+      dplyr::mutate(Hipotesis = if_else(p_value > 0.05,
+                                        "No rechaza",
+                                        "Rechaza")) %>% 
+      dplyr::group_by(Hipotesis) %>% 
+      dplyr::summarise(Probabilidad = scales::percent(n()/1000, 
+                                                  accuracy = 0.01))
+    
+    })
+  
+  # mostrar tabla
+  
+  output$table <- gt::render_gt(
+    expr = gt_tabl()
+  )
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
+
+```
+
+
+En síntesis, para cambiar el valor de la potencia se puede variar: 
+
+* El tamaño de muestra $N$
+* El tamaño del efecto que se quiere detectar como significativo $H_1^*$
+* La desviación estándar (**que NO se puede variar en esta simulación** y en la práctica no es tan sencillo de hacer, pero, a menor desviación estándar, mayor potencia y viceversa).
+
+Finalmente, recuerde que las hipótesis nulas nunca se aceptan, se tiene evidencia para rechazarlas o para no rechazarlas. 
